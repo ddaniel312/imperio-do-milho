@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Império do Milho 🌽</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>🌽 Império do Milho</h1>
+  <div id="stage" class="stage"></div>
+</header>
+<main>
+  <section id="left" class="panel">
+    <div class="money"><span id="money">R$ 0</span><small id="cps">0/s</small></div>
+    <button id="corn" aria-label="Vender">🌽<span>Vender!</span></button>
+    <div id="clickinfo" class="muted"></div>
+    <div id="event" class="event hidden"></div>
+    <h3>Cardápio</h3>
+    <div id="products" class="products"></div>
+    <div class="row">
+      <button id="prestige" class="gold" disabled>🌾 Nova Safra</button>
+      <button id="reset" class="danger">Resetar</button>
+    </div>
+    <div id="goldinfo" class="muted"></div>
+  </section>
+  <section id="right" class="panel">
+    <div class="tabs">
+      <button data-tab="buildings" class="active">Negócios</button>
+      <button data-tab="upgrades">Melhorias <b id="upcount"></b></button>
+      <button data-tab="ach">Conquistas</button>
+    </div>
+    <div id="buildings" class="tab"></div>
+    <div id="upgrades" class="tab hidden"></div>
+    <div id="ach" class="tab hidden"></div>
+  </section>
+</main>
+<div id="toasts"></div>
+<script src="game.js"></script>
+</body>
+</html>
