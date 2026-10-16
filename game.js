@@ -1,5 +1,6 @@
 "use strict";
 const SAVE_KEY = "imperio-do-milho-v1";
+const UNLOCK_AT = 0.85;
 const STAGES = [
   { at: 0, name: "🛒 Carrinho na rua" },
   { at: 500, name: "👥 Equipe crescendo" },
@@ -33,6 +34,16 @@ const BUILDINGS = [
   { id: "fjp", name: "Franquia Japão", emoji: "🇯🇵", cost: 5e12, cps: 1.2e9 },
   { id: "fmu", name: "Corn Corp Mundial", emoji: "🌍", cost: 60e12, cps: 10e9 },
 ];
+const CMAP = { far: "ar", fpt: "pt", feu: "us", fjp: "jp", fmu: "wd" };
+BUILDINGS.forEach(b => { b.country = CMAP[b.id] || "br"; });
+const COUNTRIES = [
+  { id: "br", name: "Brasil", flag: "🇧🇷", target: 20 },
+  { id: "ar", name: "Argentina", flag: "🇦🇷", target: 25 },
+  { id: "pt", name: "Portugal", flag: "🇵🇹", target: 25 },
+  { id: "us", name: "EUA", flag: "🇺🇸", target: 25 },
+  { id: "jp", name: "Japão", flag: "🇯🇵", target: 25 },
+  { id: "wd", name: "Mercado Global", flag: "🌍", target: 25 },
+];
 const UPGRADES = [];
 [[100, "Panela maior"], [1e3, "Palha premium"], [20e3, "Receita da vovó"], [500e3, "Embalagem bonita"], [20e6, "Selo orgânico"], [1e9, "Marca famosa"]]
   .forEach(([c, n], i) => UPGRADES.push({ id: "clk" + i, name: n, desc: "Cliques valem 2x", cost: c, kind: "click", req: s => s.total >= c / 2 }));
@@ -59,10 +70,13 @@ const ACHS = [
   { id: "a6", name: "Primeira franquia", ok: s => (s.owned.fbr || 0) > 0 },
   { id: "a7", name: "Exportou pro mundo", ok: s => (s.owned.fjp || 0) > 0 },
   { id: "a8", name: "Nova Safra", ok: s => s.gold > 0 },
+  { id: "a9", name: "Passaporte carimbado", ok: s => s.countries.length >= 2 },
+  { id: "a10", name: "Cidadão do mundo", ok: s => s.countries.length >= 6 },
 ];
 
-const fresh = () => ({ money: 0, total: 0, clicks: 0, owned: {}, ups: [], gold: 0, ach: [], last: Date.now(), ev: null, nextEv: 90 });
+const fresh = () => ({ money: 0, total: 0, clicks: 0, owned: {}, ups: [], gold: 0, ach: [], last: Date.now(), ev: null, nextEv: 90, countries: ["br"] });
 let S = load();
+let lastStage = 0;
 
 function load() {
   try { const o = JSON.parse(localStorage.getItem(SAVE_KEY)); if (o) return Object.assign(fresh(), o); } catch (e) {}
@@ -78,7 +92,7 @@ function fmt(n) {
 }
 const money = n => "R$ " + fmt(n);
 
-const stageIdx = () => { let k = 0; STAGES.forEach((s, i) => { if (S.total >= s.at) k = i; }); return k; }
+const stageIdx = () => { let k = 0; STAGES.forEach((s, i) => { if (S.total >= s.at) k = i; }); return k; };
 const goldMult = () => 1 + 0.1 * S.gold;
 const has = id => S.ups.includes(id);
 const costGrowth = () => 1.15 + stageIdx() * 0.01;
@@ -106,29 +120,91 @@ function bldCps(b) {
 const baseCps = () => BUILDINGS.reduce((a, b) => a + bldCps(b), 0) * allMult();
 const cps = () => baseCps() * eventMult();
 
+const countryOpen = id => S.countries.includes(id);
+function countryDev(c) {
+  const bs = BUILDINGS.filter(b => b.country === c.id);
+  return bs.reduce((a, b) => a + Math.min(1, (S.owned[b.id] || 0) / c.target), 0) / bs.length;
+}
+function checkCountries() {
+  COUNTRIES.forEach((c, i) => {
+    if (countryOpen(c.id)) return;
+    const owns = BUILDINGS.some(b => b.country === c.id && (S.owned[b.id] || 0) > 0);
+    if (owns || countryDev(COUNTRIES[i - 1]) >= UNLOCK_AT) {
+      S.countries.push(c.id);
+      FX.unlock(); confetti(40); banner(`${c.flag} ${c.name} desbloqueado!`);
+      toast(`${c.flag} ${c.name} liberado para expansão`, "gold");
+    }
+  });
+}
+function checkStage() {
+  const i = stageIdx();
+  if (i > lastStage) { banner(STAGES[i].name); FX.level(); }
+  lastStage = i;
+}
+
 function earn(n) { S.money += n; S.total += n; }
 
 function buyBuilding(id) {
   const b = BUILDINGS.find(x => x.id === id), c = bCost(b);
-  if (S.money < c) return;
+  if (S.money < c) { FX.deny(); return; }
   S.money -= c; S.owned[id] = (S.owned[id] || 0) + 1; build();
+  FX.buy(); flash("b-" + id); bump();
 }
 function buyUpgrade(id) {
   const u = UPGRADES.find(x => x.id === id);
-  if (S.money < u.cost || has(id)) return;
-  S.money -= u.cost; S.ups.push(id); build();
+  if (S.money < u.cost || has(id)) { FX.deny(); return; }
+  S.money -= u.cost; S.ups.push(id); build(); FX.upgrade(); bump();
 }
 function prestigeGain() { return Math.floor(Math.cbrt(S.total / 1e7)); }
 function prestige() {
   const g = prestigeGain();
   if (g < 1 || !confirm(`Nova Safra: reinicia o progresso e dá +${g} 🌾 Espigas Douradas (+${g * 10}% de produção permanente). Continuar?`)) return;
   const gold = S.gold + g, ach = S.ach;
-  S = fresh(); S.gold = gold; S.ach = ach; build(); toast(`🌾 Nova safra! +${g} Espigas Douradas`);
+  S = fresh(); S.gold = gold; S.ach = ach; lastStage = 0; build();
+  FX.prestige(); screenFlash(); confetti(60); banner("🌾 Nova Safra!");
+  toast(`🌾 Nova safra! +${g} Espigas Douradas`, "gold");
 }
 
-function toast(t) {
-  const d = document.createElement("div"); d.className = "toast"; d.textContent = t;
+function toast(t, cls = "") {
+  const d = document.createElement("div"); d.className = "toast " + cls; d.textContent = t;
   document.getElementById("toasts").appendChild(d); setTimeout(() => d.remove(), 3600);
+}
+function flash(id) {
+  const el = document.getElementById(id); if (!el) return;
+  el.classList.add("bought"); setTimeout(() => el.classList.remove("bought"), 500);
+}
+function bump() {
+  const el = document.getElementById("money");
+  el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump");
+}
+function screenFlash() {
+  const d = document.createElement("div"); d.className = "screenflash";
+  document.body.appendChild(d); setTimeout(() => d.remove(), 1200);
+}
+function banner(text) {
+  const d = document.createElement("div"); d.className = "banner"; d.textContent = text;
+  document.body.appendChild(d); setTimeout(() => d.remove(), 2800);
+}
+function confetti(n) {
+  const set = ["🌽", "🎉", "✨", "🌾", "🟡"];
+  for (let i = 0; i < n; i++) {
+    const c = document.createElement("span"); c.className = "conf";
+    c.textContent = set[Math.floor(Math.random() * set.length)];
+    c.style.left = Math.random() * 100 + "vw";
+    c.style.animationDuration = 2 + Math.random() * 1.8 + "s";
+    c.style.animationDelay = Math.random() * 0.5 + "s";
+    document.body.appendChild(c); setTimeout(() => c.remove(), 4500);
+  }
+}
+function kernels(x, y) {
+  if (document.querySelectorAll(".kernel").length > 30) return;
+  for (let i = 0; i < 5; i++) {
+    const k = document.createElement("span"); k.className = "kernel"; k.textContent = "🌽";
+    k.style.left = x + "px"; k.style.top = y + "px";
+    k.style.setProperty("--dx", Math.random() * 140 - 70 + "px");
+    k.style.setProperty("--dy", -(50 + Math.random() * 80) + "px");
+    document.body.appendChild(k); setTimeout(() => k.remove(), 700);
+  }
 }
 
 function tickEvents(dt) {
@@ -144,25 +220,31 @@ function tickEvents(dt) {
   S.nextEv = Math.max(40, 120 - st * 15) * (0.7 + Math.random() * 0.6);
   const pool = EVENTS.filter(e => !e.good || Math.random() < 0.35);
   const e = pool[Math.floor(Math.random() * pool.length)];
-  if (e.fine) { const f = S.money * e.fine; S.money -= f; toast(`${e.text} (-${money(f)})`); return; }
+  if (e.fine) { const f = S.money * e.fine; S.money -= f; toast(`${e.text} (-${money(f)})`); FX.bad(); return; }
   S.ev = { ...e, left: e.dur };
+  e.good ? FX.good() : FX.bad();
 }
 function resolveEvent() {
   if (!S.ev || S.ev.good) return;
   const c = Math.max(50, baseCps() * 30);
-  if (S.money < c) return toast("Sem caixa para resolver!");
-  S.money -= c; S.ev = null; toast("Problema resolvido 💪");
+  if (S.money < c) { FX.deny(); return toast("Sem caixa para resolver!"); }
+  S.money -= c; S.ev = null; FX.coin(); toast("Problema resolvido 💪");
 }
 
 function checkAch() {
-  ACHS.forEach(a => { if (!S.ach.includes(a.id) && a.ok(S)) { S.ach.push(a.id); toast("🏆 " + a.name); buildAch(); } });
+  ACHS.forEach(a => { if (!S.ach.includes(a.id) && a.ok(S)) { S.ach.push(a.id); toast("🏆 " + a.name, "gold"); FX.ach(); buildAch(); } });
 }
 
 const $ = id => document.getElementById(id);
 function build() {
+  const firstOf = {};
+  COUNTRIES.forEach((c, i) => { if (i > 0) firstOf[BUILDINGS.find(b => b.country === c.id).id] = c; });
   $("buildings").innerHTML = BUILDINGS.map(b =>
+    (firstOf[b.id] ? `<div class="lock hidden" id="lock-${firstOf[b.id].id}"></div>` : "") +
     `<button class="item" data-b="${b.id}" id="b-${b.id}"><div><b>${b.emoji} ${b.name}</b><small id="bs-${b.id}"></small></div><div style="text-align:right"><div class="n" id="bn-${b.id}"></div><div class="price" id="bp-${b.id}"></div></div></button>`).join("");
   $("products").innerHTML = PRODUCTS.map(p => `<div class="prod" id="p-${p.id}">${p.emoji}<br>${p.name}<br><small id="pv-${p.id}"></small></div>`).join("");
+  $("countries").innerHTML = COUNTRIES.map(c =>
+    `<div class="country" id="c-${c.id}"><div class="ch"><b>${c.flag} ${c.name}</b><span id="cp-${c.id}"></span></div><div class="bar"><i id="cb-${c.id}"></i><u></u></div><small id="cs-${c.id}"></small></div>`).join("");
   buildUpgrades(); buildAch();
 }
 let upKey = "";
@@ -184,12 +266,26 @@ function render() {
   $("clickinfo").textContent = `Cada venda: ${money(clickValue())}`;
   $("stage").textContent = STAGES[stageIdx()].name;
   BUILDINGS.forEach(b => {
-    const el = $("b-" + b.id), c = bCost(b), vis = S.total >= b.cost * 0.5 || (S.owned[b.id] || 0) > 0;
+    const el = $("b-" + b.id), c = bCost(b), vis = countryOpen(b.country) && (S.total >= b.cost * 0.5 || (S.owned[b.id] || 0) > 0);
     el.classList.toggle("hidden", !vis);
     el.classList.toggle("can", S.money >= c);
     $("bs-" + b.id).textContent = `${money(bldCps(b) * allMult())}/s no total`;
     $("bn-" + b.id).textContent = S.owned[b.id] || 0;
     $("bp-" + b.id).textContent = money(c);
+  });
+  COUNTRIES.forEach((c, i) => {
+    const d = countryDev(c), open = countryOpen(c.id), prev = COUNTRIES[i - 1];
+    $("cb-" + c.id).style.width = d * 100 + "%";
+    $("cp-" + c.id).textContent = open ? Math.floor(d * 100) + "%" : "🔒";
+    $("c-" + c.id).classList.toggle("locked", !open);
+    $("cs-" + c.id).textContent = !open ? `Requer ${Math.round(UNLOCK_AT * 100)}% de ${prev.name}`
+      : d >= UNLOCK_AT ? "Meta de 85% atingida ✔" : "Chegue a 85% para liberar o próximo país";
+    const lk = $("lock-" + c.id);
+    if (lk) {
+      const next = !open && countryOpen(prev.id);
+      lk.classList.toggle("hidden", !next);
+      if (next) lk.textContent = `🔒 ${c.flag} ${c.name}: precisa de 85% de desenvolvimento em ${prev.flag} ${prev.name} (agora ${Math.floor(countryDev(prev) * 100)}%)`;
+    }
   });
   const un = unlockedProducts();
   PRODUCTS.forEach(p => {
@@ -214,6 +310,9 @@ function render() {
 
 $("corn").addEventListener("click", e => {
   const v = clickValue(); earn(v); S.clicks++;
+  FX.click(); kernels(e.clientX, e.clientY);
+  const em = document.querySelector("#corn .emoji");
+  em.classList.remove("hit"); void em.offsetWidth; em.classList.add("hit");
   const p = document.createElement("div"); p.className = "pop"; p.textContent = "+" + fmt(v);
   p.style.left = e.clientX - 10 + "px"; p.style.top = e.clientY - 20 + "px";
   document.body.appendChild(p); setTimeout(() => p.remove(), 800);
@@ -222,20 +321,28 @@ $("buildings").addEventListener("click", e => { const b = e.target.closest("[dat
 $("upgrades").addEventListener("click", e => { const b = e.target.closest("[data-u]"); if (b) buyUpgrade(b.dataset.u); });
 $("event").addEventListener("click", e => { if (e.target.id === "resolve") resolveEvent(); });
 $("prestige").addEventListener("click", prestige);
-$("reset").addEventListener("click", () => { if (confirm("Apagar TODO o progresso?")) { localStorage.removeItem(SAVE_KEY); S = fresh(); build(); } });
+$("reset").addEventListener("click", () => { if (confirm("Apagar TODO o progresso?")) { localStorage.removeItem(SAVE_KEY); S = fresh(); lastStage = 0; build(); } });
 document.querySelectorAll(".tabs button").forEach(t => t.addEventListener("click", () => {
   document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("active", x === t));
   document.querySelectorAll(".tab").forEach(x => x.classList.toggle("hidden", x.id !== t.dataset.tab));
 }));
+const muteBtn = $("mute");
+const syncMute = () => { muteBtn.textContent = FX.isMuted() ? "🔇" : "🔊"; };
+muteBtn.addEventListener("click", () => { FX.setMuted(!FX.isMuted()); syncMute(); FX.click(); });
+syncMute();
 
+COUNTRIES.forEach(c => {
+  if (!countryOpen(c.id) && BUILDINGS.some(b => b.country === c.id && (S.owned[b.id] || 0) > 0)) S.countries.push(c.id);
+});
 build();
+lastStage = stageIdx();
 const away = Math.min((Date.now() - S.last) / 1000, 8 * 3600);
 if (away > 30 && baseCps() > 0) { const g = baseCps() * away * 0.5; earn(g); toast(`😴 Enquanto você estava fora: +${money(g)}`); }
 
 let prev = performance.now();
 setInterval(() => {
   const now = performance.now(), dt = Math.min((now - prev) / 1000, 1); prev = now;
-  earn(cps() * dt); tickEvents(dt); checkAch(); render();
+  earn(cps() * dt); tickEvents(dt); checkCountries(); checkStage(); checkAch(); render();
 }, 100);
 setInterval(save, 10000);
 window.addEventListener("beforeunload", save);

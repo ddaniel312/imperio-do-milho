@@ -8,13 +8,14 @@
 </head>
 <body>
 <header>
+  <button id="mute" class="mute" title="Som" aria-label="Ligar/desligar som">🔊</button>
   <h1>🌽 Império do Milho</h1>
   <div id="stage" class="stage"></div>
 </header>
 <main>
   <section id="left" class="panel">
     <div class="money"><span id="money">R$ 0</span><small id="cps">0/s</small></div>
-    <button id="corn" aria-label="Vender">🌽<span>Vender!</span></button>
+    <button id="corn" aria-label="Vender"><span class="emoji">🌽</span><span class="lbl">Vender!</span></button>
     <div id="clickinfo" class="muted"></div>
     <div id="event" class="event hidden"></div>
     <h3>Cardápio</h3>
@@ -29,14 +30,17 @@
     <div class="tabs">
       <button data-tab="buildings" class="active">Negócios</button>
       <button data-tab="upgrades">Melhorias <b id="upcount"></b></button>
+      <button data-tab="countries">Países</button>
       <button data-tab="ach">Conquistas</button>
     </div>
     <div id="buildings" class="tab"></div>
     <div id="upgrades" class="tab hidden"></div>
+    <div id="countries" class="tab hidden"></div>
     <div id="ach" class="tab hidden"></div>
   </section>
 </main>
 <div id="toasts"></div>
+<script src="audio.js"></script>
 <script src="game.js"></script>
 </body>
 </html>
